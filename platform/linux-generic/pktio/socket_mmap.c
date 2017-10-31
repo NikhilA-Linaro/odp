@@ -357,7 +357,7 @@ static void mmap_fill_ring(struct ring *ring, odp_pool_t pool_hdl, int fanout)
 	pool = pool_entry_from_hdl(pool_hdl);
 
 	/* Frame has to capture full packet which can fit to the pool block.*/
-	ring->req.tp_frame_size = (pool->headroom + pool->data_size +
+	ring->req.tp_frame_size = (pool->headroom + pool->seg_len +
 				   pool->tailroom + TPACKET_HDRLEN +
 				   TPACKET_ALIGNMENT + + (pz - 1)) & (-pz);
 
@@ -730,6 +730,7 @@ const pktio_if_ops_t sock_mmap_pktio_ops = {
 	.promisc_mode_set = sock_mmap_promisc_mode_set,
 	.promisc_mode_get = sock_mmap_promisc_mode_get,
 	.mac_get = sock_mmap_mac_addr_get,
+	.mac_set = NULL,
 	.link_status = sock_mmap_link_status,
 	.capability = sock_mmap_capability,
 	.pktin_ts_res = NULL,

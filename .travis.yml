@@ -42,6 +42,7 @@ addons:
                         - automake autoconf libtool libssl-dev graphviz mscgen
                         - libpcap-dev
                         - libconfig-dev
+                        - libnuma-dev
 #        coverity_scan:
 #                project:
 #                        name: "$TRAVIS_REPO_SLUG"
@@ -151,11 +152,17 @@ install:
           fi
         - gem install asciidoctor
 
-#	DPDK pktio. Note that cache must be purged if dpdk version changes.
+        # DPDK pktio. Note that cache must be purged if dpdk version changes.
+        - DPDK_VERS="17.08"
+        - |
+          CACHED_DPDK_VERS=`fgrep Version dpdk/pkg/dpdk.spec | cut -d " " -f 2`
+          if [ "${CACHED_DPDK_VERS}" != "${DPDK_VERS}" ]; then
+            rm -rf dpdk
+          fi
         - TARGET=${TARGET:-"x86_64-native-linuxapp-gcc"}
         - |
           if [ -z "$CROSS_ARCH" -a ! -f "dpdk/${TARGET}/lib/libdpdk.a" ]; then
-            git -c advice.detachedHead=false clone -q --depth=1 --single-branch --branch=v17.02 http://dpdk.org/git/dpdk dpdk
+            git -c advice.detachedHead=false clone -q --depth=1 --single-branch --branch=v${DPDK_VERS} http://dpdk.org/git/dpdk dpdk
             pushd dpdk
             git log --oneline --decorate
             make config T=${TARGET} O=${TARGET}
@@ -260,7 +267,7 @@ jobs:
                           # doxygen does not trap on warnings, check for them here.
                           - make doxygen-doc 2>&1 |tee doxygen.log
                           - |
-                             fgrep -rq warning ./test.log
+                             fgrep -rq warning ./doxygen.log
                              if [ $? -eq 0 ]; then
                                false
                              else
@@ -274,9 +281,8 @@ jobs:
                   script:
                           - echo ${TRAVIS_COMMIT_RANGE};
                           - ODP_PATCHES=`echo ${TRAVIS_COMMIT_RANGE} | sed 's/\.//'`;
-                          - if [ -z "${ODP_PATCHES}" ]; then env; exit 0; fi;
                           - ./scripts/ci-checkpatches.sh ${ODP_PATCHES};
 
 after_failure:
   - cat config.log
-  - find . -name 'test-suite.log' -execdir grep -il "FAILED" {} \; -exec echo {} \; -exec cat {} \;
+  - find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done

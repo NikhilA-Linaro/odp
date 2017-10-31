@@ -59,11 +59,10 @@ int odp_pktio_init_global(void)
 	shm = odp_shm_reserve("odp_pktio_entries",
 			      sizeof(pktio_table_t),
 			      sizeof(pktio_entry_t), 0);
-	pktio_tbl = odp_shm_addr(shm);
-
-	if (pktio_tbl == NULL)
+	if (shm == ODP_SHM_INVALID)
 		return -1;
 
+	pktio_tbl = odp_shm_addr(shm);
 	memset(pktio_tbl, 0, sizeof(pktio_table_t));
 
 	odp_spinlock_init(&pktio_tbl->lock);
@@ -202,8 +201,10 @@ static odp_pktio_t setup_pktio_entry(const char *name, odp_pool_t pool,
 
 	/* if successful, alloc_pktio_entry() returns with the entry locked */
 	pktio_entry = get_pktio_entry(hdl);
-	if (!pktio_entry)
+	if (!pktio_entry) {
+		unlock_entry(pktio_entry);
 		return ODP_PKTIO_INVALID;
+	}
 
 	pktio_entry->s.pool = pool;
 	memcpy(&pktio_entry->s.param, param, sizeof(odp_pktio_param_t));
@@ -214,26 +215,24 @@ static odp_pktio_t setup_pktio_entry(const char *name, odp_pool_t pool,
 	for (pktio_if = 0; pktio_if_ops[pktio_if]; ++pktio_if) {
 		ret = pktio_if_ops[pktio_if]->open(hdl, pktio_entry, name,
 						   pool);
-
-		if (!ret) {
-			pktio_entry->s.ops = pktio_if_ops[pktio_if];
-			ODP_DBG("%s uses %s\n",
-				name, pktio_if_ops[pktio_if]->name);
+		if (!ret)
 			break;
-		}
 	}
 
 	if (ret != 0) {
 		pktio_entry->s.state = PKTIO_STATE_FREE;
-		hdl = ODP_PKTIO_INVALID;
+		unlock_entry(pktio_entry);
 		ODP_ERR("Unable to init any I/O type.\n");
-	} else {
-		snprintf(pktio_entry->s.name,
-			 sizeof(pktio_entry->s.name), "%s", name);
-		pktio_entry->s.state = PKTIO_STATE_OPENED;
+		return ODP_PKTIO_INVALID;
 	}
 
+	snprintf(pktio_entry->s.name,
+		 sizeof(pktio_entry->s.name), "%s", name);
+	pktio_entry->s.state = PKTIO_STATE_OPENED;
+	pktio_entry->s.ops = pktio_if_ops[pktio_if];
 	unlock_entry(pktio_entry);
+
+	ODP_DBG("%s uses %s\n", name, pktio_if_ops[pktio_if]->name);
 
 	return hdl;
 }
@@ -895,6 +894,42 @@ int odp_pktio_mac_addr(odp_pktio_t hdl, void *mac_addr, int addr_size)
 	return ret;
 }
 
+int odp_pktio_mac_addr_set(odp_pktio_t hdl, const void *mac_addr, int addr_size)
+{
+	pktio_entry_t *entry;
+	int ret = -1;
+
+	if (addr_size < ETH_ALEN) {
+		/* Input buffer too small */
+		return -1;
+	}
+
+	entry = get_pktio_entry(hdl);
+	if (entry == NULL) {
+		ODP_DBG("pktio entry %d does not exist\n", hdl);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_DBG("already freed pktio\n");
+		return -1;
+	}
+
+	if (entry->s.state == PKTIO_STATE_STARTED) {
+		unlock_entry(entry);
+		return -1;
+	}
+
+	if (entry->s.ops->mac_set)
+		ret = entry->s.ops->mac_set(entry, mac_addr);
+
+	unlock_entry(entry);
+	return ret;
+}
+
 int odp_pktio_link_status(odp_pktio_t hdl)
 {
 	pktio_entry_t *entry;
@@ -1277,12 +1312,12 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 	if (mode == ODP_PKTIN_MODE_DISABLED)
 		return 0;
 
-	num_queues = param->num_queues;
-
-	if (num_queues == 0) {
-		ODP_DBG("pktio %s: zero input queues\n", entry->s.name);
+	if (!param->classifier_enable && param->num_queues == 0) {
+		ODP_DBG("invalid num_queues for operation mode\n");
 		return -1;
 	}
+
+	num_queues = param->classifier_enable ? 1 : param->num_queues;
 
 	rc = odp_pktio_capability(pktio, &capa);
 	if (rc) {
@@ -1312,8 +1347,11 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 			snprintf(name, sizeof(name), "odp-pktin-%i-%i",
 				 pktio_id, i);
 
-			memcpy(&queue_param, &param->queue_param,
-			       sizeof(odp_queue_param_t));
+			if (param->classifier_enable)
+				odp_queue_param_init(&queue_param);
+			else
+				memcpy(&queue_param, &param->queue_param,
+				       sizeof(odp_queue_param_t));
 
 			queue_param.type = ODP_QUEUE_TYPE_PLAIN;
 

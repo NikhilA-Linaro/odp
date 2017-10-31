@@ -972,25 +972,6 @@ odp_packet_t odp_packet_ref_pkt(odp_packet_t pkt, uint32_t offset,
 				odp_packet_t hdr);
 
 /**
- * Packet unshared data length
- *
- * When a packet has multiple references, packet data is divided into two
- * parts: unshared and shared. The unshared part always precedes the shared
- * part. This call returns number of bytes in the unshared part.  When a
- * packet has only a single reference (see odp_packet_has_ref()), all packet
- * data is unshared and unshared length equals the packet length
- * (odp_packet_len()).
- *
- * Application may modify only the unshared part, the rest of the packet data
- * must be treated as read only.
- *
- * @param pkt  Packet handle
- *
- * @return Packet unshared data length
- */
-uint32_t odp_packet_unshared_len(odp_packet_t pkt);
-
-/**
  * Test if packet has multiple references
  *
  * A packet that has multiple references share data with other packets. In case
@@ -1580,13 +1561,26 @@ void odp_packet_shaper_len_adjust_set(odp_packet_t pkt, int8_t adj);
  */
 
 /**
- * Print packet to the console
+ * Print packet debug information
  *
- * Print all packet debug information to the console.
+ * Print all packet debug information to the ODP log.
  *
  * @param pkt  Packet handle
  */
 void odp_packet_print(odp_packet_t pkt);
+
+/**
+ * Print packet data
+ *
+ * Print packet debug information with packet data to the ODP log. Operation
+ * prints 'len' bytes of packet data starting from 'offset' byte. Offset plus
+ * length must not exceed packet length (odp_packet_len()).
+ *
+ * @param pkt     Packet handle
+ * @param offset  Byte offset into the packet
+ * @param len     Number of bytes to print
+ */
+void odp_packet_print_data(odp_packet_t pkt, uint32_t offset, uint32_t len);
 
 /**
  * Perform full packet validity check
